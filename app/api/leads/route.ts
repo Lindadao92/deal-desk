@@ -27,7 +27,7 @@ const supabase = createClient(
 export async function GET() {
   const { data, error } = await supabase
     .from("leads")
-    .select("id,name,email,status,enrichment,decision,last_reply_action,created_at")
+    .select("id,name,email,status,enrichment,decision,last_reply_action,created_at,brief")
     .order("created_at", { ascending: false })
     .limit(20);
 

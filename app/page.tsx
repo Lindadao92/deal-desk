@@ -39,7 +39,25 @@ type Lead = {
   enrichment?: Enrichment | null;
   decision?: Decision | null;
   trace?: TraceStep[] | null;
+  brief?: { est_value?: number | null } | null; // est_value lives inside the brief jsonb
 };
+
+// Estimated annual contract value → compact currency. Rounded (no float artifacts),
+// "~" prefix to mark it an estimate. Returns null when there's no usable value.
+const VALUE_FMT = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+function estValue(lead: Lead): number {
+  const v = lead.brief?.est_value;
+  return typeof v === "number" && isFinite(v) && v > 0 ? v : 0;
+}
+function fmtValue(n: number): string | null {
+  if (!(n > 0)) return null;
+  return "~" + VALUE_FMT.format(Math.round(n)).replace("K", "k");
+}
 
 // Status pill styling for the lead lifecycle (incl. reply-loop outcomes).
 const STATUS_STYLES: Record<string, string> = {
@@ -382,6 +400,7 @@ function LeadCard({
   const company = enr.company || "—";
   const accent = tierAccent(d.tier);
   const na = nextAction(lead, lost);
+  const value = fmtValue(estValue(lead)); // null for cold / no-brief leads
 
   return (
     <div
@@ -402,6 +421,7 @@ function LeadCard({
         <div className="shrink-0 text-right">
           <div className={`text-[22px] font-medium leading-none ${accent.text}`}>{d.score ?? "—"}</div>
           <div className={`mt-0.5 text-[11px] leading-none ${accent.text}`}>{accent.word}</div>
+          {value && <div className="mt-1 text-[11px] leading-none text-zinc-400">{value}</div>}
         </div>
       </div>
 
@@ -913,15 +933,17 @@ export default function Home() {
         <div className="grid grid-cols-1 items-start gap-6 min-[900px]:grid-cols-3">
           {COLUMNS.map((col) => {
             const colItems = staged.filter((s) => s.stage === col.key);
+            const colValue = fmtValue(colItems.reduce((sum, { lead }) => sum + estValue(lead), 0));
             return (
               <section key={col.key} className="flex flex-col">
-                {/* quiet header row: dot + sentence-case name + muted count */}
+                {/* quiet header row: dot + sentence-case name + muted count + est value sum */}
                 <div className="mb-3 flex items-center gap-2">
                   <span className={`h-2 w-2 rounded-full ${col.dot}`} />
                   <h3 className="text-[15px] font-medium text-zinc-700">{col.label}</h3>
                   <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500">
                     {colItems.length}
                   </span>
+                  {colValue && <span className="text-[11px] text-zinc-400">{colValue}</span>}
                 </div>
 
                 {/* scrollable card list — newest at top (API returns newest-first) */}

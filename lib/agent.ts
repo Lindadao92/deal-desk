@@ -372,7 +372,8 @@ async function generateBrief(
     `  "recommended_plan": "",    // the plan/tier that fits a company their size and stage\n` +
     `  "price_band": "",          // a soft indicative range ONLY, never a hard quote\n` +
     `  "proof_point": "",         // a credible proof framing grounded in precedent; no invented specifics\n` +
-    `  "next_step": ""            // the concrete next step or proposed meeting\n` +
+    `  "next_step": "",           // the concrete next step or proposed meeting\n` +
+    `  "est_value": 0             // estimated ANNUAL contract value in whole dollars (a single integer, not a range), grounded in their size + stage and CONSISTENT with price_band\n` +
     `}`;
 
   const res = await anthropic.messages.create({
