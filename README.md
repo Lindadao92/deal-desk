@@ -44,6 +44,13 @@ Angle selection picks the outreach hook (`roi`, `time_saved`, `compliance`, or `
 
 Reply loop: when a lead replies, the agent fetches the email thread, classifies intent (`confirm`, `reschedule`, `question`, `not_interested`), and acts on its own. Confirm books a hold and sends a confirmation. Reschedule moves or books the event at the new time. A question gets a drafted answer. Not interested updates the CRM and closes the lead with no email. Replies are matched by thread id and handled exactly once.
 
+## Brief, deal value, and learning
+
+- Web brief: every qualified (hot/warm) lead gets a personalized one-page brief at `/brief/[id]`, linked in the outreach email. Claude generates it from the lead's research: a tailored value prop, use cases, an impact estimate, a recommended plan, an indicative price band, a proof point, and the next step. Nothing fabricated.
+- Estimated deal value: the brief includes an annualized `est_value` consistent with the price band. It shows as a `~$Xk` tag on the card and is summed per kanban column.
+- Activity timeline: each lead's drawer shows a timestamped trace of every step the agent took, with the actual email and Slack messages expandable inline.
+- Learning loop: when a reply resolves (meeting booked, or not interested), the outcome is written back to `past_deals` (tagged `source = 'learned'`), so future scoring cites real outcomes as precedent alongside the seed deals.
+
 ## Execution logs and traces
 
 Proof that the agent acted, not just talked:
@@ -58,7 +65,7 @@ Next.js (App Router), Supabase (Postgres), Claude (`claude-sonnet-4-6`), Composi
 
 ## Run it
 
-Set the six env vars (see `.env.example`):
+Set the env vars (see `.env.example`):
 
 ```
 ANTHROPIC_API_KEY
@@ -67,6 +74,7 @@ COMPOSIO_USER_ID
 NOTION_DATABASE_ID
 SUPABASE_URL
 SUPABASE_SERVICE_KEY
+NEXT_PUBLIC_BASE_URL    # base URL for brief links, e.g. http://localhost:3000
 ```
 
 Then:
@@ -78,7 +86,7 @@ npm run dev
 
 Open http://localhost:3000 and submit a lead.
 
-First-time setup: run `db/schema.sql`, `db/seed_deals.sql`, and `db/migration_reply_loop.sql` in the Supabase SQL editor, and connect Notion, Gmail, Google Calendar, and Slack in Composio under the user id you set in `COMPOSIO_USER_ID`.
+First-time setup: in the Supabase SQL editor run, in order, `db/schema.sql`, `db/seed_deals.sql`, `db/migration_reply_loop.sql`, `db/migration_brief.sql`, and `db/migration_learning.sql`. Then connect Notion, Gmail, Google Calendar, and Slack in Composio under the user id you set in `COMPOSIO_USER_ID`. Set `NEXT_PUBLIC_BASE_URL` to where the app runs (`http://localhost:3000` locally, or your deployed URL).
 
 ## Demo
 
