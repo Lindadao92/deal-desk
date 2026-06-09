@@ -121,9 +121,9 @@ Run a hot lead and a cold lead back to back. The hot one creates a CRM row, send
 
 While it runs, watch the kanban. Cards land in Outreach Sent or Nurture with the score and tier on each card. Click a card to open the drawer with the research, the conversion hook, the sources, the score, and the reasons behind it.
 
-To see the reply loop, point the hot or warm preset at an inbox you control (edit the email in the form), submit, then reply to the email the agent sends. Click Check replies. The agent reads your reply, classifies it, and acts: it books or moves the meeting, answers a question, or closes the lead. The card moves to Booked.
+To see the reply loop, point the hot or warm preset at an inbox you control (edit the email in the form), submit, then reply to the email the agent sends. Click Check replies. The agent classifies your reply and acts: a confirm or reschedule books or moves the meeting and the card moves to Booked; a question gets a drafted answer and the card stays in Outreach sent; not interested closes the lead and the card moves to Nurture.
 
-Heads up: hot and warm leads send real email and book real calendar events, so use an inbox you own. The cold preset never sends anything, so it is safe to run as is.
+Heads up: hot and warm leads send real email, and a hot lead also books a real calendar hold (warm proposes times instead, and only books if it later confirms via a reply), so use an inbox you own. The cold preset never sends anything, so it is safe to run as is.
 
 ## License
 
