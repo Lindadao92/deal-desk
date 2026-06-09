@@ -27,7 +27,7 @@ type Enrichment = {
 };
 
 // A structured agent step, if the lead carries a `trace` (timestamped steps).
-type TraceStep = { at?: string; step?: string; detail?: unknown };
+type TraceStep = { at?: string; step?: string; app?: string; body?: string; detail?: unknown };
 
 type Lead = {
   id: string;
@@ -441,10 +441,13 @@ function LeadCard({
 }
 
 // ---- Activity timeline (presentation only, from data already on the lead) ----
-type TimelineRow = { label: string; app?: string; at?: string | null };
+type TimelineRow = { label: string; app?: string; at?: string | null; body?: string };
 
 // Maps a structured trace step to a readable row.
 const STEP_LABELS: Record<string, { label: string; app: string }> = {
+  lead_received: { label: "Lead received", app: "Form" },
+  scored: { label: "Researched and scored", app: "Claude" },
+  crm_created: { label: "CRM record created", app: "Notion" },
   reply_received: { label: "Reply received", app: "Gmail" },
   classified: { label: "Reply classified", app: "Claude" },
   email_sent: { label: "Email sent", app: "Gmail" },
@@ -477,9 +480,11 @@ function buildTimeline(lead: Lead): TimelineRow[] {
     return trace.map((t) => {
       const known = t.step ? STEP_LABELS[t.step] : undefined;
       let label = known?.label ?? (t.step ?? "Step").replace(/_/g, " ");
-      const intent = (t.detail as { intent?: string } | undefined)?.intent;
-      if (t.step === "classified" && intent) label = `Reply classified: ${intent}`;
-      return { label, app: known?.app, at: t.at ?? null };
+      const detail = (t.detail ?? {}) as { intent?: string; score?: number; tier?: string };
+      if (t.step === "classified" && detail.intent) label = `Reply classified: ${detail.intent}`;
+      if (t.step === "scored" && detail.score != null) label = `Researched and scored ${detail.score}/${detail.tier ?? ""}`;
+      const body = typeof t.body === "string" && t.body.trim() ? t.body : undefined;
+      return { label, app: t.app ?? known?.app, at: t.at ?? null, body };
     });
   }
 
@@ -508,6 +513,7 @@ function buildTimeline(lead: Lead): TimelineRow[] {
 }
 
 function ActivityTimeline({ rows }: { rows: TimelineRow[] }) {
+  const [open, setOpen] = useState<number | null>(null);
   if (rows.length === 0) return null;
   return (
     <div>
@@ -515,18 +521,35 @@ function ActivityTimeline({ rows }: { rows: TimelineRow[] }) {
         Activity
       </div>
       <ol className="relative space-y-3 border-l border-zinc-200 pl-4">
-        {rows.map((row, i) => (
-          <li key={i} className="relative">
-            <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-zinc-300 ring-2 ring-white" />
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-sm leading-snug text-zinc-700">{row.label}</span>
-              {row.at && (
-                <time className="shrink-0 text-[11px] text-zinc-400">{fmtStamp(row.at)}</time>
+        {rows.map((row, i) => {
+          const expandable = !!row.body;
+          const isOpen = open === i;
+          return (
+            <li key={i} className="relative">
+              <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-zinc-300 ring-2 ring-white" />
+              <div
+                className={`flex items-baseline justify-between gap-2 ${expandable ? "cursor-pointer" : ""}`}
+                onClick={expandable ? () => setOpen(isOpen ? null : i) : undefined}
+              >
+                <span className="text-sm leading-snug text-zinc-700">
+                  {row.label}
+                  {expandable && (
+                    <span className="ml-1.5 text-[11px] text-zinc-400">{isOpen ? "▾ hide" : "▸ show message"}</span>
+                  )}
+                </span>
+                {row.at && (
+                  <time className="shrink-0 text-[11px] text-zinc-400">{fmtStamp(row.at)}</time>
+                )}
+              </div>
+              {row.app && <div className="text-[11px] text-zinc-400">{row.app}</div>}
+              {expandable && isOpen && (
+                <div className="mt-1.5 whitespace-pre-wrap break-words rounded-md bg-zinc-50 px-2.5 py-2 text-[12px] leading-relaxed text-zinc-600 ring-[0.5px] ring-zinc-200">
+                  {row.body}
+                </div>
               )}
-            </div>
-            {row.app && <div className="text-[11px] text-zinc-400">{row.app}</div>}
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ol>
     </div>
   );
