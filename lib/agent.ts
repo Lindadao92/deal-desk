@@ -7,6 +7,7 @@ import { Composio } from "@composio/core";
 import { createClient } from "@supabase/supabase-js";
 import { findPrecedent, summarizePrecedent } from "./retrieval";
 import { SCORING_PROMPT } from "./scoring_prompt";
+import { randomUUID } from "node:crypto";
 
 // ---- Composio action slugs ----------------------------------------------
 // These four slugs name the external actions the agent fires. Composio slugs
@@ -159,7 +160,7 @@ export type Outreach = {
 };
 
 // ---- 4. EXECUTE via Composio, branching on the decision ----
-async function execute(lead: any, research: any, decision: any): Promise<Outreach | null> {
+async function execute(lead: any, research: any, decision: any, leadId: string): Promise<Outreach | null> {
   // CRM = a page in a Notion database, created for every tier. GOTCHA: the Notion integration must be
   // explicitly shared with this database (open the DB -> ... -> Connections ->
   // add your integration) or Composio will get "could not find database".
@@ -197,7 +198,7 @@ async function execute(lead: any, research: any, decision: any): Promise<Outreac
   }
 
   // hot / warm: draft a personalized email using the chosen angle
-  const email = await draftEmail(lead, research, decision);
+  const email = await draftEmail(lead, research, decision, leadId);
   const sendRes = await runAction(ACTION_SEND_EMAIL, {
     to: lead.email, subject: email.subject, body: email.body,
   });
@@ -250,16 +251,23 @@ export async function handleLead(lead: { email: string; name: string; message: s
   const { data: existing } = await supabase.from("leads").select("id").eq("email", lead.email).maybeSingle();
   if (existing) return { skipped: true };
 
+  // Pre-generate the row id so the brief URL is known before the email is drafted.
+  const leadId = randomUUID();
+
   const research = await enrich({ email: lead.email, message: lead.message, researchDomain: lead.researchDomain });
   const decision = await decide(lead, research);
-  const outreach = await execute(lead, research, decision);
+  // Personalized one-page brief for qualified (hot/warm) leads only; cold skips it.
+  const brief = decision.tier === "cold" ? null : await generateBrief(lead, research, decision);
+  const outreach = await execute(lead, research, decision, leadId);
 
   // Emailed (hot/warm) leads now wait for a reply; cold leads are just nurtured.
   await supabase.from("leads").insert({
+    id: leadId,
     email: lead.email, name: lead.name, raw_message: lead.message,
     enrichment: research, decision,
     status: decision.tier === "cold" ? "nurtured" : "awaiting_reply",
     outreach,
+    brief,
   });
   return { research, decision };
 }
@@ -298,7 +306,8 @@ export function safeJson(res: Anthropic.Message): any {
 async function draftEmail(
   lead: { email: string; name: string; message: string },
   research: any,
-  decision: any
+  decision: any,
+  leadId: string
 ): Promise<{ subject: string; body: string }> {
   const timing = decision.auto_book
     ? `A 30-minute meeting time has already been HELD on the calendar. Tell them it's booked, give them the slot, and invite them to suggest another time if it doesn't work.`
@@ -323,6 +332,52 @@ async function draftEmail(
   const res = await anthropic.messages.create({
     model: MODEL, // claude-sonnet-4-6
     max_tokens: 1024,
+    messages: [{ role: "user", content: prompt }],
+  });
+  const email = safeJson(res);
+
+  // Additive: append ONE sentence linking the personalized brief. The URL is known
+  // up front from the pre-generated lead id; the rest of the email is untouched.
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+  if (!process.env.NEXT_PUBLIC_BASE_URL) {
+    console.warn("[brief] NEXT_PUBLIC_BASE_URL is not set — brief links fall back to http://localhost:3000");
+  }
+  const company = research.company || "your team";
+  email.body = `${email.body}\n\nI put together a quick overview for ${company}: ${baseUrl}/brief/${leadId}`;
+  return email;
+}
+
+// Generate a personalized one-page brief (hot/warm only). ONE Claude call, strict
+// JSON, every field grounded in THIS lead's research and message. Stored on the
+// `brief` jsonb column and rendered at /brief/[id].
+async function generateBrief(
+  lead: { email: string; name: string; message: string },
+  research: any,
+  scoring: any
+): Promise<any> {
+  const prompt =
+    `Create a personalized one-page sales brief for an inbound lead. Ground EVERY field in THIS ` +
+    `lead's message and research: their company, vertical, size, funding stage, the specific pain ` +
+    `they named, and any number they gave. Do NOT invent facts, customer names, logos, or metrics ` +
+    `you do not have. Concrete and human, no corporate fluff, no em-dashes.\n\n` +
+    `LEAD: ${JSON.stringify(lead)}\n` +
+    `RESEARCH: ${JSON.stringify(research)}\n` +
+    `SCORING: ${JSON.stringify(scoring)}\n\n` +
+    `Return ONLY this JSON, no prose, no markdown, no backticks:\n` +
+    `{\n` +
+    `  "headline": "",            // short, names their company and the outcome\n` +
+    `  "tailored_value_prop": "", // 1-2 sentences tied to their exact pain, vertical, and size\n` +
+    `  "use_cases": [],           // 2-3 short strings, each specific to them\n` +
+    `  "impact_estimate": "",     // a soft estimate referencing the scale/number they gave, never a guarantee\n` +
+    `  "recommended_plan": "",    // the plan/tier that fits a company their size and stage\n` +
+    `  "price_band": "",          // a soft indicative range ONLY, never a hard quote\n` +
+    `  "proof_point": "",         // a credible proof framing grounded in precedent; no invented specifics\n` +
+    `  "next_step": ""            // the concrete next step or proposed meeting\n` +
+    `}`;
+
+  const res = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 1500,
     messages: [{ role: "user", content: prompt }],
   });
   return safeJson(res);
