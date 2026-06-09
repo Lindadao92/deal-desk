@@ -8,6 +8,7 @@ type Decision = {
   angle?: string;
   reasons?: string[];
   suggested_use_cases?: string[];
+  auto_book?: boolean;
 };
 
 type Signals = {
@@ -25,6 +26,9 @@ type Enrichment = {
   sources?: { title?: string; url?: string }[] | null;
 };
 
+// A structured agent step, if the lead carries a `trace` (timestamped steps).
+type TraceStep = { at?: string; step?: string; detail?: unknown };
+
 type Lead = {
   id: string;
   name: string;
@@ -34,6 +38,7 @@ type Lead = {
   last_reply_action?: string | null;
   enrichment?: Enrichment | null;
   decision?: Decision | null;
+  trace?: TraceStep[] | null;
 };
 
 // Status pill styling for the lead lifecycle (incl. reply-loop outcomes).
@@ -415,6 +420,98 @@ function LeadCard({
   );
 }
 
+// ---- Activity timeline (presentation only, from data already on the lead) ----
+type TimelineRow = { label: string; app?: string; at?: string | null };
+
+// Maps a structured trace step to a readable row.
+const STEP_LABELS: Record<string, { label: string; app: string }> = {
+  reply_received: { label: "Reply received", app: "Gmail" },
+  classified: { label: "Reply classified", app: "Claude" },
+  email_sent: { label: "Email sent", app: "Gmail" },
+  calendar_booked: { label: "Calendar hold placed", app: "Google Calendar" },
+  calendar_patched: { label: "Calendar updated", app: "Google Calendar" },
+  slack_notified: { label: "Slack team notified", app: "Slack" },
+  notion_updated: { label: "CRM record updated", app: "Notion" },
+};
+
+function replyOutcome(action?: string | null): string {
+  const a = (action ?? "").toLowerCase();
+  if (a.includes("reschedul")) return "rescheduled";
+  if (a.includes("confirm")) return "confirmed";
+  if (a.includes("answer")) return "answered";
+  if (a.includes("closed") || a.includes("lost") || a.includes("not interested")) return "closed";
+  return action ? action : "handled";
+}
+
+function fmtStamp(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+// Prefer a real structured trace; otherwise reconstruct the story from existing fields.
+function buildTimeline(lead: Lead): TimelineRow[] {
+  const trace = Array.isArray(lead.trace) ? lead.trace : [];
+  if (trace.length) {
+    return trace.map((t) => {
+      const known = t.step ? STEP_LABELS[t.step] : undefined;
+      let label = known?.label ?? (t.step ?? "Step").replace(/_/g, " ");
+      const intent = (t.detail as { intent?: string } | undefined)?.intent;
+      if (t.step === "classified" && intent) label = `Reply classified: ${intent}`;
+      return { label, app: known?.app, at: t.at ?? null };
+    });
+  }
+
+  const d = lead.decision ?? {};
+  const tier = (d.tier ?? "").toLowerCase();
+  const rows: TimelineRow[] = [{ label: "Lead received", app: "Form", at: lead.created_at }];
+
+  if (d.score != null && tier) {
+    rows.push({ label: `Researched and scored ${d.score}/${tier}`, app: "Claude" });
+  }
+
+  if (tier === "cold") {
+    rows.push({ label: "CRM record created", app: "Notion" });
+    rows.push({ label: "Routed to nurture, no outreach", app: "Slack" });
+  } else if (tier) {
+    rows.push({ label: "CRM record created", app: "Notion" });
+    rows.push({ label: "Email sent", app: "Gmail" });
+    if (d.auto_book) rows.push({ label: "Calendar hold placed", app: "Google Calendar" });
+    rows.push({ label: "Slack team notified", app: "Slack" });
+  }
+
+  if (lead.last_reply_action) {
+    rows.push({ label: `Reply received → ${replyOutcome(lead.last_reply_action)}`, app: "Gmail" });
+  }
+  return rows;
+}
+
+function ActivityTimeline({ rows }: { rows: TimelineRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div>
+      <div className="mb-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
+        Activity
+      </div>
+      <ol className="relative space-y-3 border-l border-zinc-200 pl-4">
+        {rows.map((row, i) => (
+          <li key={i} className="relative">
+            <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-zinc-300 ring-2 ring-white" />
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-sm leading-snug text-zinc-700">{row.label}</span>
+              {row.at && (
+                <time className="shrink-0 text-[11px] text-zinc-400">{fmtStamp(row.at)}</time>
+              )}
+            </div>
+            {row.app && <div className="text-[11px] text-zinc-400">{row.app}</div>}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 // Right-side detail drawer for a selected lead. Slides in over a translucent
 // backdrop; closes via the X button, a backdrop click, or Esc.
 function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void }) {
@@ -439,6 +536,7 @@ function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const enr = lead.enrichment ?? {};
   const company = enr.company || "—";
   const reasons = d.reasons ?? [];
+  const timeline = buildTimeline(lead);
 
   return (
     <div className="fixed inset-0 z-50">
@@ -532,6 +630,9 @@ function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void }) {
               </ul>
             </div>
           )}
+
+          {/* Activity — the chronological story of what the agent did */}
+          <ActivityTimeline rows={timeline} />
         </div>
       </div>
     </div>
