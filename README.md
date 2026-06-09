@@ -23,6 +23,27 @@ form submit
 
 Every scoring reason cites a specific fact from the lead, the research, or past-deal precedent. Nothing is invented, and missing data is flagged instead of guessed.
 
+## Architecture
+
+```
+  Browser: form, kanban board, lead drawer, public /brief/[id]
+     |
+     |  POST /api/leads      GET /api/leads (polled every 3s)      POST /api/replies
+     v
+  Next.js API routes (Vercel, Node runtime)
+     |
+     v
+  Agent pipeline (lib/agent.ts):  enrich -> score -> execute -> log
+     |
+     +-> Claude (claude-sonnet-4-6): research, ICP scoring, brief, reply triage
+     +-> Composio: Notion (CRM), Gmail, Google Calendar, Slack
+     +-> Supabase (Postgres): leads + past_deals (trace and brief stored as jsonb)
+
+  Reply loop (lib/replies.ts, the "Check replies" button):
+     fetch thread (Gmail) -> classify (Claude) -> act (Composio)
+        -> write the outcome back to past_deals (the learning loop)
+```
+
 ## Composio is the execution layer
 
 Composio handles auth and tool-calling for every external action. Four apps are connected, and the agent calls these slugs:
@@ -103,3 +124,7 @@ While it runs, watch the kanban. Cards land in Outreach Sent or Nurture with the
 To see the reply loop, point the hot or warm preset at an inbox you control (edit the email in the form), submit, then reply to the email the agent sends. Click Check replies. The agent reads your reply, classifies it, and acts: it books or moves the meeting, answers a question, or closes the lead. The card moves to Booked.
 
 Heads up: hot and warm leads send real email and book real calendar events, so use an inbox you own. The cold preset never sends anything, so it is safe to run as is.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
