@@ -12,6 +12,9 @@ import { createClient } from "@supabase/supabase-js";
 // this must run on the Node.js runtime (not edge). It's also never cached.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// The lead pipeline (web research + scoring + Composio actions) runs ~37s.
+// Vercel Pro allows up to 300s; 120 gives ample headroom.
+export const maxDuration = 120;
 
 // Server-only Supabase client. The service key lives in env and is read here on
 // the server — it is NEVER serialized to the browser (route handlers run server-side).

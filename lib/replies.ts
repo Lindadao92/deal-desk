@@ -22,7 +22,6 @@ import {
 // ---- New Composio action slugs for the reply loop (mirror agent.ts style;
 // confirm exact names in your Composio dashboard before running) ----
 const ACTION_FETCH_THREAD      = "GMAIL_FETCH_MESSAGE_BY_THREAD_ID";
-const ACTION_FETCH_EMAILS      = "GMAIL_FETCH_EMAILS";
 const ACTION_UPDATE_EVENT      = "GOOGLECALENDAR_PATCH_EVENT";
 const ACTION_UPDATE_CRM_RECORD = "NOTION_UPDATE_ROW_DATABASE";
 
@@ -300,29 +299,20 @@ async function act(
   return { status: "closed_lost", actionLine: "Closed lost" };
 }
 
-// Find the lead's latest reply. Preferred path: the actual outreach THREAD —
-// the newest message in it not sent by the agent. Fallback (no stored thread, or
-// thread had no inbound msg): search by the lead's sender address.
+// Find the lead's latest reply — THREAD-ONLY: the newest message in the stored
+// outreach thread that wasn't sent by the agent. We deliberately do NOT fall back
+// to an address search: replies arrive from the inbox's base address (not the
+// per-lead +alias we sent to), so a base-address query would misattribute replies
+// across leads that share one inbox. No thread id → no detection.
 async function findReply(lead: LeadRow): Promise<{ id: string; text: string } | null> {
-  if (lead.outreach?.thread_id) {
-    const res = await runAction(ACTION_FETCH_THREAD, {
-      thread_id: lead.outreach.thread_id,
-      user_id: "me",
-    });
-    const inbound = extractMessages(res).filter((m) => !isSentByAgent(m, lead.email));
-    const latest = pickLatest(inbound);
-    const id = latest && messageId(latest);
-    if (id) return { id, text: messageText(latest) };
-    // else fall through to address search
-  }
+  if (!lead.outreach?.thread_id) return null;
 
-  const res = await runAction(ACTION_FETCH_EMAILS, {
-    query: `from:${lead.email}`,
+  const res = await runAction(ACTION_FETCH_THREAD, {
+    thread_id: lead.outreach.thread_id,
     user_id: "me",
-    max_results: 5,
-    include_payload: true,
   });
-  const latest = pickLatest(extractMessages(res)) ?? extractMessages(res)[0];
+  const inbound = extractMessages(res).filter((m) => !isSentByAgent(m, lead.email));
+  const latest = pickLatest(inbound);
   const id = latest && messageId(latest);
   if (id) return { id, text: messageText(latest) };
   return null;

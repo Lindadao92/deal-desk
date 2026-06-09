@@ -7,6 +7,8 @@ import { checkReplies } from "@/lib/replies";
 // checkReplies uses the same Node-only SDKs as the agent; never cache.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// The reply loop can fetch + classify + act across several leads; give it room.
+export const maxDuration = 120;
 
 export async function POST() {
   try {

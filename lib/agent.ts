@@ -6,8 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Composio } from "@composio/core";
 import { createClient } from "@supabase/supabase-js";
 import { findPrecedent, summarizePrecedent } from "./retrieval";
-import fs from "fs";
-import path from "path";
+import { SCORING_PROMPT } from "./scoring_prompt";
 
 // ---- Composio action slugs ----------------------------------------------
 // These four slugs name the external actions the agent fires. Composio slugs
@@ -31,12 +30,6 @@ export const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPA
 // you connected Notion/Gmail/Calendar/Slack under (defaults to "default").
 const COMPOSIO_USER_ID = process.env.COMPOSIO_USER_ID || "default";
 
-// scoring_prompt.txt lives next to this file under lib/. process.cwd() is the
-// project root when Next.js runs server code, so resolve from there.
-const SCORING_PROMPT = fs.readFileSync(
-  path.join(process.cwd(), "lib", "scoring_prompt.txt"),
-  "utf-8"
-);
 export const MODEL = "claude-sonnet-4-6"; // current Sonnet for cost/speed
 
 // Thin wrapper so every external side effect goes through one place.
@@ -146,7 +139,9 @@ async function decide(form: any, research: any) {
 
   const res = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 1024,
+    // Research-rich leads produce long reasons + angle_justification +
+    // suggested_use_cases; 1024 truncated the JSON mid-string. 2048 gives headroom.
+    max_tokens: 2048,
     messages: [{ role: "user", content: filled }],
   });
   return safeJson(res); // the decision JSON (score, tier, action, angle, auto_book...)
@@ -314,6 +309,8 @@ async function draftEmail(
     `OPEN with the research "conversion_hook" if present; otherwise cite at least ONE specific item ` +
     `from research.signals (funding, hiring, news, recent_activity, press) and name it concretely. ` +
     `Do NOT invent facts — if the research is thin, keep the opener general rather than fabricating.\n` +
+    `Weave in the SINGLE most relevant item from decision.suggested_use_cases — phrase it as how ` +
+    `we'd specifically help THEM (tie it to their pain/vertical/size), not as a generic feature.\n` +
     `Sound like a real person wrote it: plain, direct, warm, lowercase-friendly subject ok.\n` +
     `Hard rules: under 120 words, one clear ask, NO em-dashes, no corporate fluff, no buzzwords,\n` +
     `no "I hope this email finds you well", no exclamation spam.\n` +
