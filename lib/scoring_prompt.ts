@@ -27,6 +27,9 @@ clearly stronger reason, and say why.
 RULES:
 - Every item in "reasons" MUST cite a specific fact from the LEAD, the
   RESEARCH, or PRECEDENT. No generic statements.
+- When a comparable past deal in PRECEDENT is relevant, cite it in at least ONE
+  reason (e.g. "Similar Series B fintech converted on the ROI angle"). If no
+  comparable precedent exists, do not invent one.
 - Every "suggested_use_cases" item MUST be specific to THIS prospect — reference
   their vertical, their size/stage, or the exact pain named in their message.
   No generic product claims. Give 2-3 short use cases.
