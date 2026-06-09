@@ -79,3 +79,19 @@ npm run dev
 Open http://localhost:3000 and submit a lead.
 
 First-time setup: run `db/schema.sql`, `db/seed_deals.sql`, and `db/migration_reply_loop.sql` in the Supabase SQL editor, and connect Notion, Gmail, Google Calendar, and Slack in Composio under the user id you set in `COMPOSIO_USER_ID`.
+
+## Demo
+
+The form has three one-click presets behind the "+ New lead" button:
+
+- Hot fintech lead: a Series A fintech with reconciliation pain. Scores hot, fires full outreach.
+- Warm mid-market lead: a larger company that is just researching. Scores warm, emails and proposes times, no auto-book.
+- Cold student: a free Gmail address with no company. Scores cold, routes to nurture, sends no email.
+
+Run a hot lead and a cold lead back to back. The hot one creates a CRM row, sends the email, books a calendar hold, and posts to Slack. The cold one tags for nurture and posts a Slack note with no email. That contrast is the proof the branching is real, not scripted.
+
+While it runs, watch the kanban. Cards land in Outreach Sent or Nurture with the score and tier on each card. Click a card to open the drawer with the research, the conversion hook, the sources, the score, and the reasons behind it.
+
+To see the reply loop, point the hot or warm preset at an inbox you control (edit the email in the form), submit, then reply to the email the agent sends. Click Check replies. The agent reads your reply, classifies it, and acts: it books or moves the meeting, answers a question, or closes the lead. The card moves to Booked.
+
+Heads up: hot and warm leads send real email and book real calendar events, so use an inbox you own. The cold preset never sends anything, so it is safe to run as is.
