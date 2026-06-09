@@ -621,7 +621,7 @@ function LeadDrawer({ lead, onClose }: { lead: Lead; onClose: () => void }) {
             ) : (
               d.angle && (
                 <span className="inline-flex items-center rounded-md bg-zinc-900/5 px-2.5 py-1 text-xs font-medium text-zinc-700">
-                  angle: <span className="ml-1 font-semibold">{d.angle}</span>
+                  Pitch: <span className="ml-1 font-semibold">{prettyAngle(d.angle)}</span>
                 </span>
               )
             )}
