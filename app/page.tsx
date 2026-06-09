@@ -76,21 +76,47 @@ function TierBadge({ tier }: { tier?: string }) {
   );
 }
 
-// Small tier tag for cards (board is grouped by stage, so tier rides along as a tag).
-const TIER_TAG: Record<string, string> = {
-  hot: "bg-orange-100 text-orange-700",
-  warm: "bg-amber-100 text-amber-800",
-  cold: "bg-zinc-200 text-zinc-600",
+// Tier is the only accent color: hot=green, warm=amber, cold=gray.
+const TIER_ACCENT: Record<string, { text: string; dot: string; word: string }> = {
+  hot: { text: "text-emerald-600", dot: "bg-emerald-500", word: "Hot" },
+  warm: { text: "text-amber-600", dot: "bg-amber-500", word: "Warm" },
+  cold: { text: "text-zinc-400", dot: "bg-zinc-400", word: "Cold" },
 };
+function tierAccent(tier?: string) {
+  return TIER_ACCENT[(tier ?? "").toLowerCase()] ?? { text: "text-zinc-400", dot: "bg-zinc-300", word: "—" };
+}
 
-function TierTag({ tier }: { tier?: string }) {
-  const t = (tier || "").toLowerCase();
-  if (!t) return null;
-  const cls = TIER_TAG[t] ?? "bg-zinc-200 text-zinc-600";
+// One muted, monochrome chip. Sentence-case content only.
+function Chip({ children }: { children: React.ReactNode }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${cls}`}>
-      {t}
+    <span className="inline-flex items-center rounded-md bg-zinc-100 px-1.5 py-0.5 text-[12px] text-zinc-500">
+      {children}
     </span>
+  );
+}
+
+// Small 12px monochrome line icons for the next-action row.
+function ActionIcon({ name }: { name: "mail" | "calendar" | "ban" }) {
+  const c = "h-3 w-3 shrink-0";
+  if (name === "calendar")
+    return (
+      <svg className={c} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
+        <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" />
+        <path d="M2.5 6.5h11M5.5 2.5v2M10.5 2.5v2" />
+      </svg>
+    );
+  if (name === "ban")
+    return (
+      <svg className={c} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
+        <circle cx="8" cy="8" r="5.5" />
+        <path d="m4.4 4.4 7.2 7.2" />
+      </svg>
+    );
+  return (
+    <svg className={c} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3.5" width="12" height="9" rx="1.5" />
+      <path d="m2.5 4.5 5.5 4 5.5-4" />
+    </svg>
   );
 }
 
@@ -225,10 +251,10 @@ function ResearchSection({ enr, useCases }: { enr: Enrichment; useCases?: string
 // Workflow stages, left → right.
 type Stage = "Outreach Sent" | "Booked" | "Nurture";
 
-const COLUMNS: { key: Stage; label: string; header: string; badge: string }[] = [
-  { key: "Outreach Sent", label: "Outreach Sent", header: "bg-sky-500 text-white", badge: "bg-white/25 text-white" },
-  { key: "Booked", label: "Booked", header: "bg-emerald-500 text-white", badge: "bg-white/25 text-white" },
-  { key: "Nurture", label: "Nurture", header: "bg-slate-500 text-white", badge: "bg-white/25 text-white" },
+const COLUMNS: { key: Stage; label: string; dot: string }[] = [
+  { key: "Outreach Sent", label: "Outreach sent", dot: "bg-blue-500" },
+  { key: "Booked", label: "Booked", dot: "bg-emerald-500" },
+  { key: "Nurture", label: "Nurture", dot: "bg-zinc-400" },
 ];
 
 // Derive a lead's pipeline STAGE from existing fields only (tier, status,
@@ -265,8 +291,76 @@ function deriveStage(lead: Lead): { stage: Stage; lost: boolean } {
   return { stage: "Outreach Sent", lost: false };
 }
 
-// A compact lead card (always collapsed). Clicking it opens the detail drawer.
-// Board groups by stage, so tier shows as a small colored tag.
+// ---- Card derivations (presentation only, from existing fields) ----
+
+// Readable pitch label, sentence case: roi -> ROI, time_saved -> Time saved.
+function prettyAngle(a?: string): string {
+  if (!a) return "";
+  if (a.toLowerCase() === "roi") return "ROI";
+  const s = a.replace(/_/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+function isBooked(lead: Lead): boolean {
+  const status = lead.status ?? "";
+  const action = (lead.last_reply_action ?? "").toLowerCase();
+  return (
+    status === "confirmed" ||
+    status === "rescheduled" ||
+    /confirmed|rescheduled|invite sent|booked/.test(action)
+  );
+}
+
+// The single status chip label.
+function statusLabel(lead: Lead, lost: boolean): string {
+  const tier = (lead.decision?.tier ?? "").toLowerCase();
+  const action = (lead.last_reply_action ?? "").toLowerCase();
+  if (lost) return "Closed lost";
+  if (tier === "cold") return "Nurturing";
+  if (lead.status === "rescheduled" || action.includes("rescheduled")) return "Rescheduled";
+  if (isBooked(lead)) return "Meeting booked";
+  return "Awaiting reply";
+}
+
+function shortDate(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function meetingTime(action?: string | null): string | null {
+  const m = (action ?? "").match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}[^\s]*/);
+  if (!m) return null;
+  const d = new Date(m[0]);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleString(undefined, {
+    weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
+function daysSince(iso?: string): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+
+// The next-action line: an icon + a muted sentence.
+function nextAction(lead: Lead, lost: boolean): { icon: "mail" | "calendar" | "ban"; text: string } {
+  const tier = (lead.decision?.tier ?? "").toLowerCase();
+  if (lost) return { icon: "ban", text: "Closed, not interested" };
+  if (tier === "cold") return { icon: "ban", text: "No outreach, below ICP" };
+  if (isBooked(lead)) {
+    const when = meetingTime(lead.last_reply_action);
+    return { icon: "calendar", text: when ? `Meeting · ${when}` : "Meeting · scheduled" };
+  }
+  const days = daysSince(lead.created_at);
+  const ago = days === 0 ? "today" : `${days}d ago`;
+  return { icon: "mail", text: `Emailed ${shortDate(lead.created_at)} · ${ago}` };
+}
+
+// A compact lead card. Clicking it opens the detail drawer. Tier is the only
+// accent (the dot + colored score), so the board reads near-monochrome.
 function LeadCard({
   lead,
   highlight,
@@ -281,53 +375,41 @@ function LeadCard({
   const d = lead.decision ?? {};
   const enr = lead.enrichment ?? {};
   const company = enr.company || "—";
+  const accent = tierAccent(d.tier);
+  const na = nextAction(lead, lost);
 
   return (
     <div
       onClick={onSelect}
-      className={`cursor-pointer rounded-2xl border border-zinc-200 p-4 shadow-sm transition-all duration-700 hover:shadow-md ${
-        highlight ? "bg-emerald-50 ring-2 ring-emerald-300" : "bg-white"
+      className={`cursor-pointer rounded-xl border-[0.5px] px-4 py-3.5 transition-colors duration-500 ${
+        highlight ? "border-zinc-300 bg-zinc-50" : "border-zinc-200 bg-white hover:bg-zinc-50"
       }`}
     >
-      {/* identity + focal score */}
+      {/* top row: tier dot + name/company  |  score + tier word */}
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-zinc-900">
-            {lead.name}
-            <span className="ml-1.5 font-normal text-zinc-400">@ {company}</span>
+        <div className="flex min-w-0 items-start gap-2">
+          <span className={`mt-[5px] h-2 w-2 shrink-0 rounded-full ${accent.dot}`} />
+          <div className="min-w-0">
+            <div className="truncate text-[15px] font-medium leading-tight text-zinc-800">{lead.name}</div>
+            <div className="truncate text-[13px] leading-tight text-zinc-400">{company}</div>
           </div>
-          <div className="mt-0.5 truncate text-[11px] text-zinc-400">{lead.email}</div>
         </div>
-        <div className="flex shrink-0 items-center rounded-xl bg-zinc-50 px-4 py-1.5">
-          <div className={`text-4xl font-black leading-none tracking-tight ${scoreColor(d.score)}`}>
-            {d.score ?? "—"}
-          </div>
+        <div className="shrink-0 text-right">
+          <div className={`text-[22px] font-medium leading-none ${accent.text}`}>{d.score ?? "—"}</div>
+          <div className={`mt-0.5 text-[11px] leading-none ${accent.text}`}>{accent.word}</div>
         </div>
       </div>
 
-      {/* tier tag + (lost) + angle / nurture + status */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <TierTag tier={d.tier} />
-        {lost && (
-          <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700">
-            Lost
-          </span>
-        )}
-        {d.tier === "cold" ? (
-          <span className="inline-flex items-center rounded-md bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-500">
-            nurture — no outreach
-          </span>
-        ) : (
-          d.angle && (
-            <span className="inline-flex items-center rounded-md bg-zinc-900/5 px-2.5 py-1 text-xs font-medium text-zinc-700">
-              angle: <span className="ml-1 font-semibold">{d.angle}</span>
-            </span>
-          )
-        )}
-        <StatusPill status={lead.status} />
-        {lead.last_reply_action && (
-          <span className="text-[11px] text-zinc-500">· {lead.last_reply_action}</span>
-        )}
+      {/* up to two chips: pitch (hot/warm) + one status */}
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+        {d.tier !== "cold" && d.angle && <Chip>{prettyAngle(d.angle)} pitch</Chip>}
+        <Chip>{statusLabel(lead, lost)}</Chip>
+      </div>
+
+      {/* next-action line */}
+      <div className="mt-2 flex items-center gap-1.5 text-[12px] text-zinc-400">
+        <ActionIcon name={na.icon} />
+        <span className="truncate">{na.text}</span>
       </div>
     </div>
   );
@@ -717,42 +799,34 @@ export default function Home() {
           </form>
         )}
 
-        {/* Pipeline — kanban board grouped by tier */}
-        <div className="mb-4 flex items-center gap-2">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+        {/* Pipeline — quiet heading, monochrome live indicator */}
+        <div className="mb-5 flex items-center gap-2">
+          <span className="relative flex h-1.5 w-1.5" aria-hidden>
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-zinc-300 opacity-75" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-zinc-400" />
           </span>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">Pipeline</h2>
-          <span className="rounded-full bg-zinc-200 px-2 py-0.5 text-[11px] font-bold text-zinc-600">
-            {leads.length}
-          </span>
+          <h2 className="text-[15px] font-medium text-zinc-700">Pipeline</h2>
+          <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500">{leads.length}</span>
         </div>
 
-        <div className="grid grid-cols-1 items-start gap-4 min-[900px]:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-6 min-[900px]:grid-cols-3">
           {COLUMNS.map((col) => {
             const colItems = staged.filter((s) => s.stage === col.key);
             return (
-              <section
-                key={col.key}
-                className="max-h-[calc(100vh-220px)] overflow-y-auto rounded-2xl border border-zinc-200 bg-zinc-50/60"
-              >
-                {/* sticky column header */}
-                <div
-                  className={`sticky top-0 z-[1] flex items-center justify-between px-4 py-2.5 ${col.header}`}
-                >
-                  <span className="text-sm font-bold uppercase tracking-wider">{col.label}</span>
-                  <span
-                    className={`inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-2 py-0.5 text-xs font-bold ${col.badge}`}
-                  >
+              <section key={col.key} className="flex flex-col">
+                {/* quiet header row: dot + sentence-case name + muted count */}
+                <div className="mb-3 flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${col.dot}`} />
+                  <h3 className="text-[15px] font-medium text-zinc-700">{col.label}</h3>
+                  <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500">
                     {colItems.length}
                   </span>
                 </div>
 
-                {/* column body — newest at top (API returns newest-first) */}
-                <div className="flex flex-col gap-3 p-3">
+                {/* scrollable card list — newest at top (API returns newest-first) */}
+                <div className="flex max-h-[calc(100vh-210px)] flex-col gap-2.5 overflow-y-auto pr-0.5">
                   {colItems.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-center text-xs text-zinc-400">
+                    <div className="rounded-xl border-[0.5px] border-dashed border-zinc-200 px-4 py-6 text-center text-[12px] text-zinc-400">
                       No leads yet
                     </div>
                   ) : (
