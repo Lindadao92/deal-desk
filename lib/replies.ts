@@ -35,6 +35,8 @@ type LeadRow = {
   outreach: Outreach | null;
   last_message_id: string | null;
   trace: any[] | null;
+  enrichment: any | null; // research JSON (vertical, company_size, etc.) for the learning loop
+  decision: any | null;   // scoring JSON (angle) for the learning loop
 };
 
 type Intent = "reschedule" | "confirm" | "question" | "not_interested";
@@ -349,14 +351,58 @@ async function handleOneReply(lead: LeadRow): Promise<ReplyResult> {
     })
     .eq("id", lead.id);
 
+  // Learning loop: write the resolved outcome back into past_deals so future
+  // scoring sees it as precedent. Runs AFTER the lead update (best-effort).
+  if (status === "confirmed" || status === "rescheduled") await recordOutcome(lead, "won");
+  else if (status === "closed_lost") await recordOutcome(lead, "lost");
+
   return { id: lead.id, email: lead.email, action: actionLine, status };
+}
+
+// Append a resolved deal to past_deals (source='learned'), so the agent learns
+// from live outcomes. Best-effort: never throws (a failure here must not break
+// reply handling). Idempotent: at most one learned row per lead.
+async function recordOutcome(lead: LeadRow, outcome: "won" | "lost") {
+  try {
+    const enr = (lead.enrichment ?? {}) as any;
+    const dec = (lead.decision ?? {}) as any;
+    const vertical = enr.vertical ?? null;
+    const company_size = typeof enr.company_size === "number" ? enr.company_size : null;
+    // Nothing useful to learn from without a vertical + size for precedent matching.
+    if (!vertical || company_size == null) return;
+
+    // Idempotency: skip if we already recorded an outcome for this lead.
+    const { data: existing } = await supabase
+      .from("past_deals")
+      .select("id")
+      .eq("source", "learned")
+      .ilike("notes", `%${lead.id}%`)
+      .limit(1);
+    if (existing && existing.length) return;
+
+    await supabase.from("past_deals").insert({
+      company_name: enr.company || lead.name,
+      vertical,
+      company_size,
+      funding_stage: enr.funding_stage ?? null,
+      persona: enr.persona ?? null,
+      angle_used: dec.angle ?? null,
+      outcome, // 'won' | 'lost'
+      cycle_days: 0,
+      source: "learned",
+      notes: `learned from live lead ${lead.id}`,
+    });
+  } catch (err) {
+    // best-effort: log and move on (e.g. migration not yet run)
+    console.warn("[learning] recordOutcome skipped:", (err as Error).message);
+  }
 }
 
 // ---- Entry point: react to replies for every awaiting-reply lead ----
 export async function checkReplies() {
   const { data: leads, error } = await supabase
     .from("leads")
-    .select("id,name,email,status,outreach,last_message_id,trace")
+    .select("id,name,email,status,outreach,last_message_id,trace,enrichment,decision")
     .eq("status", "awaiting_reply")
     .order("created_at", { ascending: false })
     .limit(50);
