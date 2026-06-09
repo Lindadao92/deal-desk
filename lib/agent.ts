@@ -160,7 +160,10 @@ export type Outreach = {
 };
 
 // ---- 4. EXECUTE via Composio, branching on the decision ----
-async function execute(lead: any, research: any, decision: any, leadId: string): Promise<Outreach | null> {
+// `trace` accumulates a timestamped record of each step (and, for email/Slack,
+// the message body) so the UI can show the real story. Additive: it records what
+// the existing actions do, it does not change the fork or the Composio calls.
+async function execute(lead: any, research: any, decision: any, leadId: string, trace: any[]): Promise<Outreach | null> {
   // CRM = a page in a Notion database, created for every tier. GOTCHA: the Notion integration must be
   // explicitly shared with this database (open the DB -> ... -> Connections ->
   // add your integration) or Composio will get "could not find database".
@@ -183,17 +186,26 @@ async function execute(lead: any, research: any, decision: any, leadId: string):
   });
   // Notion returns the created page id; keep it so the reply loop can update the row.
   const notion_page_id: string | null = (crmRes as any)?.data?.id ?? null;
+  trace.push({
+    step: "crm_created",
+    app: "Notion",
+    at: new Date().toISOString(),
+    body:
+      `Name: ${lead.name}\n` +
+      `Email: ${lead.email}\n` +
+      `Company: ${research.company || "—"}\n` +
+      `Tier: ${decision.tier}   Score: ${decision.score}   Angle: ${decision.angle}`,
+  });
 
   if (decision.tier === "cold") {
     const company = research.company || "unknown company";
     const bullets = decision.reasons.slice(0, 2).map((r: string) => `• ${r}`).join("\n");
-    await runAction(ACTION_NOTIFY_TEAM, {
-      channel: SLACK_CHANNEL,
-      markdown_text:
-        `⚪ *Nurture: ${lead.name} @ ${company} — ${decision.tier} (${decision.score})*\n` +
-        `${bullets}\n` +
-        `→ Routed to nurture · no outreach`,
-    });
+    const nurtureMsg =
+      `⚪ *Nurture: ${lead.name} @ ${company} — ${decision.tier} (${decision.score})*\n` +
+      `${bullets}\n` +
+      `→ Routed to nurture · no outreach`;
+    await runAction(ACTION_NOTIFY_TEAM, { channel: SLACK_CHANNEL, markdown_text: nurtureMsg });
+    trace.push({ step: "slack_notified", app: "Slack", at: new Date().toISOString(), body: nurtureMsg });
     return null;
   }
 
@@ -205,18 +217,31 @@ async function execute(lead: any, research: any, decision: any, leadId: string):
   // Gmail returns { id, threadId, ... } — keep them so we can find the reply later.
   const thread_id: string | null = (sendRes as any)?.data?.threadId ?? null;
   const sent_message_id: string | null = (sendRes as any)?.data?.id ?? null;
+  trace.push({
+    step: "email_sent",
+    app: "Gmail",
+    at: new Date().toISOString(),
+    body: `Subject: ${email.subject}\n\n${email.body}`,
+  });
 
   let calendar_event_id: string | null = null;
   if (decision.auto_book) { // hot only
+    const slot = nextBusinessSlot(); // ISO 8601
     const calRes = await runAction(ACTION_BOOK_MEETING, {
       summary: `${research.company} <> us — intro`,
       attendees: [lead.email],
-      start_datetime: nextBusinessSlot(),  // your helper — return ISO 8601
+      start_datetime: slot,
       event_duration_minutes: 30,
     });
     // Calendar create nests the event under response_data; keep the id to reschedule.
     calendar_event_id =
       (calRes as any)?.data?.response_data?.id ?? (calRes as any)?.data?.id ?? null;
+    trace.push({
+      step: "calendar_booked",
+      app: "Google Calendar",
+      at: new Date().toISOString(),
+      body: `Meeting time: ${slot} (30 min)`,
+    });
   }
 
   const company = research.company || "unknown company";
@@ -227,13 +252,12 @@ async function execute(lead: any, research: any, decision: any, leadId: string):
   const actionLine = decision.auto_book
     ? "✅ Emailed + held a slot"
     : "✅ Emailed · proposed times";
-  await runAction(ACTION_NOTIFY_TEAM, {
-    channel: "#deal-desk",
-    markdown_text:
-      `🟢 *Qualified: ${lead.name} @ ${company} — ${decision.tier} (${decision.score})*\n` +
-      `${factLines}\n` +
-      `${actionLine}`,
-  });
+  const slackMsg =
+    `🟢 *Qualified: ${lead.name} @ ${company} — ${decision.tier} (${decision.score})*\n` +
+    `${factLines}\n` +
+    `${actionLine}`;
+  await runAction(ACTION_NOTIFY_TEAM, { channel: SLACK_CHANNEL, markdown_text: slackMsg });
+  trace.push({ step: "slack_notified", app: "Slack", at: new Date().toISOString(), body: slackMsg });
 
   return {
     recipient: lead.email,
@@ -254,11 +278,23 @@ export async function handleLead(lead: { email: string; name: string; message: s
   // Pre-generate the row id so the brief URL is known before the email is drafted.
   const leadId = randomUUID();
 
+  // Activity trace: each step records a real timestamp; email/Slack steps also
+  // store their message body so the drawer can expand them. Stored in the existing
+  // `trace` jsonb (no new column).
+  const trace: any[] = [{ step: "lead_received", app: "Form", at: new Date().toISOString() }];
+
   const research = await enrich({ email: lead.email, message: lead.message, researchDomain: lead.researchDomain });
   const decision = await decide(lead, research);
+  trace.push({
+    step: "scored",
+    app: "Claude",
+    at: new Date().toISOString(),
+    detail: { score: decision.score, tier: decision.tier },
+  });
+
   // Personalized one-page brief for qualified (hot/warm) leads only; cold skips it.
   const brief = decision.tier === "cold" ? null : await generateBrief(lead, research, decision);
-  const outreach = await execute(lead, research, decision, leadId);
+  const outreach = await execute(lead, research, decision, leadId, trace);
 
   // Emailed (hot/warm) leads now wait for a reply; cold leads are just nurtured.
   await supabase.from("leads").insert({
@@ -268,6 +304,7 @@ export async function handleLead(lead: { email: string; name: string; message: s
     status: decision.tier === "cold" ? "nurtured" : "awaiting_reply",
     outreach,
     brief,
+    trace,
   });
   return { research, decision };
 }
